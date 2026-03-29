@@ -319,10 +319,7 @@ with col_right:
                         num_variations,
                     )
 
-                    if len(hero_files) > 1:
-                        all_results.append({"hero": hf.name, "variations": variations})
-                    else:
-                        all_results = variations
+                    all_results.extend(variations)
 
                 progress.progress(1.0, text="Done!")
 
