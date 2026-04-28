@@ -4,6 +4,23 @@ import base64
 import yaml
 from pathlib import Path
 
+try:
+    import pypdf
+    PYPDF_AVAILABLE = True
+except ImportError:
+    PYPDF_AVAILABLE = False
+
+
+def extract_pdf_text(file_bytes: bytes) -> str:
+    import io
+    reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+    texts = []
+    for page in reader.pages:
+        t = page.extract_text()
+        if t:
+            texts.append(t.strip())
+    return "\n\n".join(texts)
+
 st.set_page_config(
     page_title="Email Subject Generator",
     page_icon="✉️",
@@ -175,7 +192,12 @@ def generate_for_hero(
     hero_b64, hero_mime,
     existing_subject, existing_preview,
     num_variations,
+    refinement_notes="",
+    pdf_context="",
 ) -> list[dict]:
+    refinement_section = f"\n\nAdditional direction:\n{refinement_notes.strip()}" if refinement_notes.strip() else ""
+    pdf_section = f"\n\nReference documents — use the messaging, tone, claims, and brand language from these docs when writing subject lines and preview texts:\n{pdf_context.strip()}" if pdf_context.strip() else ""
+
     prompt = f"""You are an expert email marketing copywriter.
 
 You are given two images:
@@ -192,7 +214,7 @@ Rules:
 - Maintain the email's core message, tone, and style from the existing email
 - Vary the angle, hook, or phrasing across variations — do not repeat patterns
 - Keep subject lines concise (under 60 characters)
-- Keep preview text under 90 characters
+- Keep preview text under 90 characters{refinement_section}{pdf_section}
 
 Return ONLY a valid YAML list with NO extra text, NO code fences, NO comments — just the raw list in this exact format:
 - text: "..."
@@ -271,6 +293,29 @@ with col_left:
                 st.image(hf, caption=hf.name, use_container_width=True)
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    st.markdown("<p class='block-label'>Refinement notes (optional)</p>", unsafe_allow_html=True)
+    refinement_notes = st.text_area(
+        "",
+        placeholder="e.g. More urgency, focus on exclusivity, avoid discount language...",
+        height=90,
+        label_visibility="collapsed",
+        key="refinement",
+    )
+
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.markdown("<p class='block-label'>Reference docs (optional PDF)</p>", unsafe_allow_html=True)
+    pdf_files = st.file_uploader(
+        "",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="pdfs",
+        label_visibility="collapsed",
+    )
+    if pdf_files:
+        for f in pdf_files:
+            st.markdown(f"<p style='font-size:11px;color:#555;margin:2px 0;'>📄 {f.name}</p>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
     generate_btn = st.button("GENERATE YAML →", use_container_width=True)
 
 
@@ -303,6 +348,20 @@ with col_right:
                 email_b64 = img_to_b64(email_file.read())
                 email_mime = get_mime(email_file.name)
 
+                # Extract PDF context
+                pdf_context = ""
+                if pdf_files and PYPDF_AVAILABLE:
+                    pdf_texts = []
+                    for f in pdf_files:
+                        try:
+                            text = extract_pdf_text(f.read())
+                            if text.strip():
+                                pdf_texts.append(f"--- {f.name} ---\n{text}")
+                        except Exception:
+                            pass
+                    if pdf_texts:
+                        pdf_context = "\n\n".join(pdf_texts)
+
                 all_results = []
                 progress = st.progress(0, text="Starting...")
 
@@ -317,6 +376,8 @@ with col_right:
                         hero_b64, hero_mime,
                         existing_subject, existing_preview,
                         num_variations,
+                        refinement_notes,
+                        pdf_context,
                     )
 
                     all_results.extend(variations)
